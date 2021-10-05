@@ -1,0 +1,508 @@
+# -*- coding: utf-8 -*-
+from bs4 import BeautifulSoup as bs
+import requests
+import matplotlib.pyplot as plt
+from io import BytesIO
+import cv2
+import numpy as np
+from PIL import ImageFont, ImageDraw, Image
+import time
+
+import pygame
+pygame.mixer.init()
+# pygame.mixer.music.load('/home/pi/Desktop/mp3/energy.wav')
+# pygame.mixer.music.play()
+# while pygame.mixer.music.get_busy() == True:
+#     continue
+play_flag = True
+def click(event,x,y,flags,param):
+    global play_flag
+    play_emotion = get_emotion()
+    file_path = '/home/pi/Desktop/mp3/'
+    if event == cv2.EVENT_LBUTTONDOWN:
+        play_flag = not play_flag
+    if play_flag:
+        pygame.mixer.music.load(file_path+play_emotion+'.mp3')
+        pygame.mixer.music.play()
+    else:
+        pygame.mixer.music.stop()
+
+freq_weather = 100
+freq_emotion = 1
+freq_time = 5
+delay_time = 1
+
+colab = False
+
+RESOLUTION = (480,800)
+wc = (10,10) # weather coordinates
+ec = (300,600)
+icon_size = 160
+winname = "image"
+if not colab:
+    cv2.namedWindow(winname,cv2.WINDOW_NORMAL)        # Create a named window
+    # cv2.moveWindow(winname, 0,-30)
+    cv2.setMouseCallback(winname,click)
+    cv2.setWindowProperty(winname, cv2.WND_PROP_FULLSCREEN,1)
+else:
+    plt.rcParams['figure.figsize'] = [20, 10]
+icon_dict = {
+    '맑음' : 'https://i.imgur.com/DSxQusT.jpg',
+    '구름조금' : 'https://i.imgur.com/wmjZ9Hp.jpg',
+    '구름많음' : 'https://i.imgur.com/Ve2kY7I.jpg',
+    '흐림' : 'https://i.imgur.com/7IdICCJ.jpg',
+    '비' : 'https://i.imgur.com/YvHI7aj.jpg',
+    '눈' : 'https://i.imgur.com/OxYbK5Y.jpg',
+    '천둥번개' : 'https://i.imgur.com/4m1em1Z.jpg',
+    '소나기' : 'https://i.imgur.com/LqkgCAF.jpg'
+}
+
+icons = {}
+weather_short = list(icon_dict.keys())
+
+for k in icon_dict.keys():
+    url = icon_dict[k]
+    response = requests.get(url)
+    img = Image.open(BytesIO(response.content))
+    img = np.array(img)
+    img = img[:,:,::-1]
+    resized = cv2.resize(img, (icon_size,icon_size), interpolation = cv2.INTER_AREA)
+    icons[k] = resized.copy()
+
+# emotion_icons = {
+#     "Angry" : "https://i.imgur.com/poZRbqs.png",
+#     "Disgusting" : "",
+#     "Fearful" : "",
+#     "Happy" : "",
+#     "Sad" : "",
+#     "Surpring" : "",
+#     "Neutral":"https://i.imgur.com/xuA3Crh.png"
+# }
+emotion_icons = {
+    "Angry" : "https://i.imgur.com/UWqBp2j.jpg",
+    "Disgusting" : "https://i.imgur.com/zLePttz.jpg",
+    "Fearful" : "https://i.imgur.com/gp3eAng.jpg",
+    "Happy" : "https://i.imgur.com/aIVIQng.jpg",
+    "Sad" : "https://i.imgur.com/Q9A149x.jpg",
+    "Surpring" : "https://i.imgur.com/fcBZhYv.jpg",
+    "Neutral":"https://i.imgur.com/A2BFcHq.jpg"
+}
+emotion_imgs = {}
+
+for k in emotion_icons.keys():
+    url = emotion_icons[k]
+    response = requests.get(url)
+    img = Image.open(BytesIO(response.content))
+    img = np.array(img)
+    img = img[:,:,::-1]
+    resized = cv2.resize(img, (icon_size,icon_size), interpolation = cv2.INTER_AREA)
+    emotion_imgs[k] = resized.copy()
+
+def get_time_str():
+    html = requests.get('https://m.search.naver.com/search.naver?sm=mtp_hty.top&where=m&query=%EC%84%9C%EC%9A%B8+%ED%98%84%EC%9E%AC+%EC%8B%9C%EA%B0%84')
+    soup = bs(html.text, 'html.parser')
+    # data1 = soup.find('div', {'class':'area _wc_onoff_area'})
+    hour = soup.find('em', {'class':'_hour'}).text
+    minute = soup.find('em', {'class':'_minute'}).text
+    ampm = soup.find('span', {'class':'bpm _ampm'}).text
+    # print(hour,":",minute)
+
+    mydate = soup.find('p', {'class':'date _date'}).text[:-5]
+    # print(mydate)
+    result = hour+":"+minute + ' ' + ampm +"\n"+mydate
+    return result
+    
+def get_weather():
+    result = {}
+    html = requests.get('https://search.naver.com/search.naver?query=청주 날씨')
+    soup = bs(html.text, 'html.parser')
+    data1 = soup.find('div', {'class':'weather_box'})
+    find_address = data1.find('span', {'class':'btn_select'}).text
+    # print('현재 위치: '+find_address)
+    result['place'] = find_address
+
+    find_currenttemp = data1.find('span',{'class': 'todaytemp'}).text # ico_state ws1
+    cast = data1.find('p',{'class': 'cast_txt'}).text 
+    # print("cast",cast)
+    result['cast'] = cast
+
+    short_cast = ''
+    for cast_i in weather_short:
+        if cast_i in cast:
+            short_cast = cast_i
+    result['short_cast'] = short_cast
+
+    # print('현재 온도: '+find_currenttemp+'℃')
+    result['temp'] = find_currenttemp
+
+    data2 = data1.findAll('dd')
+    find_dust = data2[0].find('span', {'class':'num'}).text
+    find_ultra_dust = data2[1].find('span', {'class':'num'}).text
+    find_ozone = data2[2].find('span', {'class':'num'}).text
+    # print('현재 미세먼지: '+find_dust)
+    result['dust'] = find_dust
+    # print('현재 초미세먼지: '+find_ultra_dust)
+    result['ultra_dust'] = find_ultra_dust
+    # print('현재 오존지수: '+find_ozone)
+    return result
+
+def get_weather_image(weather_info):
+    weather = weather_info['short_cast']
+    bg_img = np.zeros((RESOLUTION[0],RESOLUTION[1],3),dtype=np.uint8)
+
+    fontpath = "NanumGothic.ttf"
+    font = ImageFont.truetype(fontpath, 20)
+    img_pil = Image.fromarray(bg_img)
+    draw = ImageDraw.Draw(img_pil)
+    time_str = get_time_str()
+
+    draw.text((wc[0], wc[1] + icon_size + 20),
+            weather_info['cast'], font=font,
+            fill=(255,255,255))
+    draw.text((wc[0], wc[1] + icon_size + 60),
+            '현재 온도: '+weather_info['temp']+"℃", 
+            font=font, fill=(255,255,255))
+    draw.text((wc[0], wc[1] + icon_size + 90),
+            time_str, 
+            font=font, fill=(255,255,255))
+    font = ImageFont.truetype(fontpath, 15)
+    draw.text((wc[0], wc[1] + icon_size + 260),
+            '현재 미세먼지: '+weather_info['dust'], 
+            font=font, fill=(255,255,255))
+    draw.text((wc[0], wc[1] + icon_size + 285),
+            '현재 초미세먼지: '+weather_info['ultra_dust'], 
+            font=font, fill=(255,255,255))
+    bg_img = np.array(img_pil)
+    weather_roi = bg_img[wc[0]:wc[0]+icon_size,wc[1]:wc[1]+icon_size]
+    np.copyto(weather_roi, icons[weather])
+    return bg_img
+
+def get_emotion_image(emo,bg):
+    emo_img = emotion_imgs[emo]
+    roi = bg[ec[0]:ec[0]+icon_size,ec[1]:ec[1]+icon_size]
+    np.copyto(roi, emo_img)
+    return bg
+def get_emotion():
+    res = "Neutral"
+    try:
+        with open('emotion','r') as f:
+            res = f.readline().rstrip()
+    except ValueError:
+        print("invalid value")
+    if len(res) < 2:
+        res = "Neutral"
+    return res
+
+if __name__ == "__main__":
+    # freq_weather = 100
+    # freq_emotion = 1
+    # delay_time = 1
+    fw = 0
+    fe = 0
+    weather_info = get_weather()
+    emotion = get_emotion()
+    while cv2.waitKey(1) != ord('q'):
+        time.sleep(delay_time)
+        if fw >= freq_weather:
+            fw = 0
+            weather_info = get_weather()
+        else:
+            fw += 1
+        if fe >= freq_emotion:
+            fw = 0
+            emotion = get_emotion()
+        else:
+            fe += 1
+        print(emotion)
+        weather = weather_info['short_cast']
+        # print(weather)
+        image = get_weather_image(weather_info)
+        # "Angry","Disgusting","Fearful","Happy","Sad","Surpring","Neutral"
+        image = get_emotion_image(emotion,image)
+        # cv2.putText(image, weather, (wc[0], wc[1]+icon_size+10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        if not colab:
+            cv2.imshow("image",image)
+            # cv2.waitKey()
+        else:
+            image = image[:,:,::-1]
+            plt.imshow(image)
+            
+            #!/usr/bin/env python3
+# rpi_ws281x library strandtest example
+# Author: Tony DiCola (tony@tonydicola.com)
+#
+# Direct port of the Arduino NeoPixel library strandtest example.  Showcases
+# various animations on a strip of NeoPixels.
+import sys
+sys.path.append('/home/pi/.local/lib/python3.7/site-packages')
+import time
+from rpi_ws281x import *
+import argparse
+import numpy as np
+
+# LED strip configuration:
+LED_COUNT      = 8      # Number of LED pixels.
+LED_PIN        = 18      # GPIO pin connected to the pixels (18 uses PWM!).
+#LED_PIN        = 10      # GPIO pin connected to the pixels (10 uses SPI /dev/spidev0.0).
+LED_FREQ_HZ    = 800000  # LED signal frequency in hertz (usually 800khz)
+LED_DMA        = 10      # DMA channel to use for generating signal (try 10)
+LED_BRIGHTNESS = 50     # Set to 0 for darkest and 255 for brightest
+LED_INVERT     = False   # True to invert the signal (when using NPN transistor level shift)
+LED_CHANNEL    = 0       # set to '1' for GPIOs 13, 19, 41, 45 or 53
+
+emotion_color = {
+    "Angry" : Color(255, 0, 0),
+    "Disgusting" : Color(0, 255, 0),
+    "Fearful" : Color(255, 0, 0),
+    "Happy" : Color(255, 255, 255),
+    "Sad" : Color(100, 100, 255),
+    "Surpring" : Color(255, 0, 0),
+    "Neutral":Color(255, 0, 0)
+}
+
+def get_emotion():
+    res = "Neutral"
+    try:
+        with open('emotion','r') as f:
+            res = f.readline().rstrip()
+    except ValueError:
+        print("invalid value")
+    if len(res) < 2:
+        res = "Neutral"
+    return res
+
+# Define functions which animate LEDs in various ways.
+def colorWipe(strip, color, wait_ms=50):
+    """Wipe color across display a pixel at a time."""
+    for i in range(strip.numPixels()):
+        strip.setPixelColor(i, color)
+        strip.show()
+        time.sleep(wait_ms/1000.0)
+ 
+def theaterChase(strip, color, wait_ms=50, iterations=10):
+    """Movie theater light style chaser animation."""
+    for j in range(iterations):
+        for q in range(3):
+            for i in range(0, strip.numPixels(), 3):
+                strip.setPixelColor(i+q, color)
+            strip.show()
+            time.sleep(wait_ms/1000.0)
+            for i in range(0, strip.numPixels(), 3):
+                strip.setPixelColor(i+q, 0)
+ 
+def wheel(pos):
+    """Generate rainbow colors across 0-255 positions."""
+    if pos < 85:
+        return Color(pos * 3, 255 - pos * 3, 0)
+    elif pos < 170:
+        pos -= 85
+        return Color(255 - pos * 3, 0, pos * 3)
+    else:
+        pos -= 170
+        return Color(0, pos * 3, 255 - pos * 3)
+ 
+def rainbow(strip, wait_ms=20, iterations=1):
+    """Draw rainbow that fades across all pixels at once."""
+    for j in range(256*iterations):
+        for i in range(strip.numPixels()):
+            strip.setPixelColor(i, wheel((i+j) & 255))
+        strip.show()
+        time.sleep(wait_ms/1000.0)
+ 
+def rainbowCycle(strip, wait_ms=20, iterations=5):
+    """Draw rainbow that uniformly distributes itself across all pixels."""
+    for j in range(256*iterations):
+        for i in range(strip.numPixels()):
+            strip.setPixelColor(i, wheel((int(i * 256 / strip.numPixels()) + j) & 255))
+        strip.show()
+        time.sleep(wait_ms/1000.0)
+ 
+def theaterChaseRainbow(strip, wait_ms=50):
+    """Rainbow movie theater light style chaser animation."""
+    for j in range(256):
+        for q in range(3):
+            for i in range(0, strip.numPixels(), 3):
+                strip.setPixelColor(i+q, wheel((i+j) % 255))
+            strip.show()
+            time.sleep(wait_ms/1000.0)
+            for i in range(0, strip.numPixels(), 3):
+                strip.setPixelColor(i+q, 0)
+ 
+if __name__ == '__main__':
+ 
+    # Create NeoPixel object with appropriate configuration.
+    strip = Adafruit_NeoPixel(LED_COUNT, LED_PIN, LED_FREQ_HZ, LED_DMA, LED_INVERT, LED_BRIGHTNESS, LED_CHANNEL)
+    # Intialize the library (must be called once before other functions).
+    strip.begin()
+ 
+    print ('Press Ctrl-C to quit.')
+    try:
+        while True:
+            emotion = get_emotion()
+            if emotion == "Angry" :
+                colorWipe(strip, Color(255, 0, 0))  # Red wipe
+            elif emotion == "Disgusting" :
+                theaterChase(strip, Color(  0,   0, 127))  # Blue theater chase
+            elif emotion == "Fearful" :
+                theaterChase(strip, Color(127,   0,   0))  # Red theater chase
+            elif emotion == "Happy" :
+                theaterChase(strip, Color(127, 127, 127))  # White theater chase
+            elif emotion == "Sad" :
+                rainbow(strip)
+            elif emotion == "Surpring" :
+                theaterChaseRainbow(strip)
+            elif emotion == "Neutral":
+                colorWipe(strip, Color(255, 255, 255))  # Red wipe
+            # print ('Color wipe animations.')
+            # colorWipe(strip, Color(255, 0, 0))  # Red wipe
+            # colorWipe(strip, Color(0, 255, 0))  # Blue wipe
+            # colorWipe(strip, Color(0, 0, 255))  # Green wipe
+            # print ('Theater chase animations.')
+            # theaterChase(strip, Color(127, 127, 127))  # White theater chase
+            # theaterChase(strip, Color(127,   0,   0))  # Red theater chase
+            # theaterChase(strip, Color(  0,   0, 127))  # Blue theater chase
+            # print ('Rainbow animations.')
+            # rainbow(strip)
+            # rainbowCycle(strip)
+            # theaterChaseRainbow(strip)
+ 
+    except KeyboardInterrupt:
+        colorWipe(strip, Color(0,0,0), 10)
+        
+        import cv2
+import matplotlib.pyplot as plt
+from keras.preprocessing.image import img_to_array
+from keras.models import load_model
+import numpy as np
+from collections import Counter
+
+emotion_classifier = load_model('emotion_model.hdf5', compile=False)
+
+faceCascade = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
+
+EMOTIONS = ["Angry" ,"Disgusting","Fearful", "Happy", "Sad", "Surpring", "Neutral"]
+
+
+winname = "VideoFrame"
+print("RUN!")
+show_hide = False
+if not show_hide:
+    cv2.namedWindow(winname)        # Create a named window
+    cv2.moveWindow(winname, 10,10) 
+
+capture = cv2.VideoCapture(0)
+capture.set(cv2.CAP_PROP_FRAME_WIDTH, 480)
+capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
+
+def get_vote(mylist):
+    if len(mylist) == 0: return None
+    return Counter(mylist).most_common(n=1)[0][0]
+
+print("RUN LOOP")
+recog_buffer = ["Neutral"]*10
+while cv2.waitKey(1) != ord('q'):
+    ret, frame = capture.read()
+    if ret:
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = faceCascade.detectMultiScale(
+                gray,
+                scaleFactor=1.1,
+                minNeighbors=10,
+                minSize=(10, 10),
+        )
+        first = True
+        for (x, y, w, h) in faces:
+            roi = gray[y:y + h, x:x + w]
+            roi = cv2.resize(roi, (48, 48))
+            roi = roi.astype("float") / 255.0
+            roi = img_to_array(roi)
+            roi = np.expand_dims(roi, axis=0)
+            
+            preds = emotion_classifier.predict(roi)[0]
+            emotion_probability = np.max(preds)
+            label = EMOTIONS[preds.argmax()]
+            recog_buffer.pop(0)
+            recog_buffer.append(label)
+            if first:
+                first = False
+                print(label)
+                mytext = get_vote(recog_buffer)
+                with open("emotion",'w') as f:
+                    print("mytext:",mytext)
+                    f.write(mytext)
+            
+            if not show_hide:
+                cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 3)
+        
+        if not show_hide:
+            cv2.imshow(winname, frame)
+        
+capture.release()
+cv2.destroyAllWindows()
+# img = cv2.imread('qj6xabj.jpeg')
+
+"""
+Description: Train emotion classification model
+"""
+
+from keras.callbacks import CSVLogger, ModelCheckpoint, EarlyStopping
+from keras.callbacks import ReduceLROnPlateau
+from keras.preprocessing.image import ImageDataGenerator
+from load_and_process import load_fer2013
+from load_and_process import preprocess_input
+from models.cnn import mini_XCEPTION
+from sklearn.model_selection import train_test_split
+
+# parameters
+batch_size = 32
+num_epochs = 10000
+input_shape = (48, 48, 1)
+validation_split = .2
+verbose = 1
+num_classes = 7
+patience = 50
+base_path = 'models/'
+
+# data generator
+data_generator = ImageDataGenerator(
+                        featurewise_center=False,
+                        featurewise_std_normalization=False,
+                        rotation_range=10,
+                        width_shift_range=0.1,
+                        height_shift_range=0.1,
+                        zoom_range=.1,
+                        horizontal_flip=True)
+
+# model parameters/compilation
+model = mini_XCEPTION(input_shape, num_classes)
+model.compile(optimizer='adam', loss='categorical_crossentropy',
+              metrics=['accuracy'])
+model.summary()
+
+
+
+
+
+    # callbacks
+log_file_path = base_path + '_emotion_training.log'
+csv_logger = CSVLogger(log_file_path, append=False)
+early_stop = EarlyStopping('val_loss', patience=patience)
+reduce_lr = ReduceLROnPlateau('val_loss', factor=0.1,
+                                  patience=int(patience/4), verbose=1)
+trained_models_path = base_path + '_mini_XCEPTION'
+model_names = trained_models_path + '.{epoch:02d}-{val_acc:.2f}.hdf5'
+model_checkpoint = ModelCheckpoint(model_names, 'val_loss', verbose=1,
+                                                    save_best_only=True)
+callbacks = [model_checkpoint, csv_logger, early_stop, reduce_lr]
+
+# loading dataset
+faces, emotions = load_fer2013()
+faces = preprocess_input(faces)
+num_samples, num_classes = emotions.shape
+xtrain, xtest,ytrain,ytest = train_test_split(faces, emotions,test_size=0.2,shuffle=True)
+model.fit_generator(data_generator.flow(xtrain, ytrain,
+                                            batch_size),
+                        steps_per_epoch=len(xtrain) / batch_size,
+                        epochs=num_epochs, verbose=1, callbacks=callbacks,
+                        validation_data=(xtest,ytest))
