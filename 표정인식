@@ -1,0 +1,72 @@
+import cv2
+import matplotlib.pyplot as plt
+from keras.preprocessing.image import img_to_array
+from keras.models import load_model
+import numpy as np
+from collections import Counter
+
+emotion_classifier = load_model('emotion_model.hdf5', compile=False)
+
+faceCascade = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
+
+EMOTIONS = ["Angry" ,"Disgusting","Fearful", "Happy", "Sad", "Surpring", "Neutral"]
+
+
+winname = "VideoFrame"
+print("RUN!")
+show_hide = False
+if not show_hide:
+    cv2.namedWindow(winname)        # Create a named window
+    cv2.moveWindow(winname, 10,10) 
+
+capture = cv2.VideoCapture(0)
+capture.set(cv2.CAP_PROP_FRAME_WIDTH, 480)
+capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
+
+def get_vote(mylist):
+    if len(mylist) == 0: return None
+    return Counter(mylist).most_common(n=1)[0][0]
+
+print("RUN LOOP")
+recog_buffer = ["Neutral"]*10
+while cv2.waitKey(1) != ord('q'):
+    ret, frame = capture.read()
+    if ret:
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = faceCascade.detectMultiScale(
+                gray,
+                scaleFactor=1.1,
+                minNeighbors=10,
+                minSize=(10, 10),
+        )
+        first = True
+        for (x, y, w, h) in faces:
+            roi = gray[y:y + h, x:x + w]
+            roi = cv2.resize(roi, (48, 48))
+            roi = roi.astype("float") / 255.0
+            roi = img_to_array(roi)
+            roi = np.expand_dims(roi, axis=0)
+            
+            preds = emotion_classifier.predict(roi)[0]
+            emotion_probability = np.max(preds)
+            label = EMOTIONS[preds.argmax()]
+            recog_buffer.pop(0)
+            recog_buffer.append(label)
+            if first:
+                first = False
+                print(label)
+                mytext = get_vote(recog_buffer)
+                with open("emotion",'w') as f:
+                    print("mytext:",mytext)
+                    f.write(mytext)
+            
+            if not show_hide:
+                cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 3)
+        
+        if not show_hide:
+            cv2.imshow(winname, frame)
+        
+capture.release()
+cv2.destroyAllWindows()
+# img = cv2.imread('qj6xabj.jpeg')
